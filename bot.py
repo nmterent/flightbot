@@ -35,9 +35,9 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 # ------------------------------- CONFIG -------------------------------------
-API_TOKEN  = os.getenv("TP_TOKEN", "ВАШ_ТОКЕН_TRAVELPAYOUTS")
-TG_TOKEN   = os.getenv("TG_TOKEN", "ВАШ_ТОКЕН_БОТА")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID", "ВАШ_CHAT_ID")
+API_TOKEN  = os.getenv("TP_TOKEN", "6b3cb2c3552940395c991540474872d6")
+TG_TOKEN   = os.getenv("TG_TOKEN", "8693344775:AAFZXJ_bO_yvkIlQNuQxQQaUFAD2Ppw8bwc")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID", "497754887")
 
 # Маршруты. Для round-trip укажите trip_days (длительность поездки в днях);
 # для перелёта в одну сторону оставьте trip_days = None.
