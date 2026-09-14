@@ -34,7 +34,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
  
-# ------------------------------- CONFIG -------------------------------------
+# ------------------------------- CONFIG ------------------------------------- 
 API_TOKEN  = os.getenv("TP_TOKEN", "6b3cb2c3552940395c991540474872d6")
 TG_TOKEN   = os.getenv("TG_TOKEN", "8693344775:AAFZXJ_bO_yvkIlQNuQxQQaUFAD2Ppw8bwc")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "497754887")
@@ -45,10 +45,10 @@ ROUTES = [
     {"origin": "MOW", "destination": "AYT", "threshold": 15000, "trip_days": None},
     {"origin": "GOJ", "destination": "AYT", "threshold": 20000, "trip_days": None},
     {"origin": "MOW", "destination": "AYT", "threshold": 30000, "trip_days": 7},
-    # Газипаша-Аланья (GZP) — ближе к Аланье. Рейсов меньше, чем в AYT,
-    # поэтому иногда бот будет показывать «нет данных» — это нормально.
-    {"origin": "MOW", "destination": "GZP", "threshold": 18000, "trip_days": None},
-    {"origin": "GOJ", "destination": "GZP", "threshold": 22000, "trip_days": None},
+    # Газипаша-Аланья (GZP) — прямых рейсов из РФ сейчас нет, поэтому
+    # обязательно allow_transfers=True, иначе данных не будет вовсе.
+    {"origin": "MOW", "destination": "GZP", "threshold": 25000, "trip_days": None, "allow_transfers": True},
+    {"origin": "GOJ", "destination": "GZP", "threshold": 30000, "trip_days": None, "allow_transfers": True},
 ]
  
 WEEK_AHEAD_DAYS  = 7          # горизонт «ближайшей недели» для даты вылета
@@ -107,7 +107,16 @@ def save_threshold(route_k, value):
  
 # ----------------------------- ЗАПРОС ЦЕН -----------------------------------
 def get_week_min_price(route):
-    """Мин. цена по маршруту в ближайшую неделю. Возвращает (price, details) или (None, None)."""
+    """
+    Мин. цена по маршруту в ближайшую неделю. Возвращает (price, details) или (None, None).
+ 
+    Поддерживает:
+      • route['trip_days']       — round-trip: длительность поездки в днях
+                                   (None = билет в одну сторону);
+      • route['allow_transfers'] — если True, учитываются рейсы с пересадками
+                                   (нужно для направлений без прямых рейсов,
+                                    например Аланья/Газипаша).
+    """
     today = dt.date.today()
     params = {
         "origin": route["origin"],
@@ -123,6 +132,11 @@ def get_week_min_price(route):
     else:
         params["one_way"] = "true"
  
+    # по умолчанию только прямые; пересадки разрешаем, если явно указано
+    # allow_transfers, ИЛИ это round-trip (обратные плечи часто с пересадкой)
+    if not route.get("allow_transfers") and not route.get("trip_days"):
+        params["direct"] = "true"
+ 
     resp = requests.get(
         "https://api.travelpayouts.com/aviasales/v3/prices_for_dates",
         params=params, timeout=30)
@@ -132,6 +146,7 @@ def get_week_min_price(route):
         return None, None
  
     horizon = today + dt.timedelta(days=WEEK_AHEAD_DAYS)
+    trip_days = route.get("trip_days")
     best = None
     for item in data["data"]:
         dep_str = item.get("departure_at", "")[:10]
@@ -141,8 +156,20 @@ def get_week_min_price(route):
             continue
         if not (today <= dep_date <= horizon):
             continue
-        # для round-trip при желании можно проверять длительность поездки,
-        # но Travelpayouts сам подбирает return_at близко к запросу
+ 
+        # для round-trip: если задана длительность и известна дата возврата —
+        # отсеиваем варианты, где поездка сильно отличается от желаемой (±2 дня)
+        if trip_days:
+            ret_str = item.get("return_at", "")[:10]
+            if ret_str:
+                try:
+                    ret_date = dt.date.fromisoformat(ret_str)
+                    actual_days = (ret_date - dep_date).days
+                    if abs(actual_days - trip_days) > 2:
+                        continue
+                except ValueError:
+                    pass
+ 
         if best is None or item["price"] < best["price"]:
             best = item
     if best is None:
@@ -288,14 +315,40 @@ _await_threshold = {"active": False, "route_k": None}
  
  
 def current_prices_text():
-    lines = ["💰 <b>Текущий минимум за неделю:</b>"]
+    lines = ["💰 <b>Текущий минимум за неделю:</b>", ""]
     for route in ROUTES:
         try:
-            price, _ = get_week_min_price(route)
-            p = f"{price} ₽" if price else "нет данных"
+            price, details = get_week_min_price(route)
         except Exception:
-            p = "ошибка запроса"
-        lines.append(f"• {route_label(route)}: {p} (порог {route['threshold']} ₽)")
+            details = None
+            price = None
+            lines.append(f"• {route_label(route)}: ошибка запроса")
+            continue
+ 
+        if price is None:
+            lines.append(f"• {route_label(route)}: нет данных "
+                         f"(порог {route['threshold']} ₽)")
+            continue
+ 
+        dep = details.get("departure_at", "")[:10]
+        if route.get("trip_days"):
+            # round-trip: показываем обе даты и фактическую длительность
+            ret = details.get("return_at", "")[:10]
+            if dep and ret:
+                try:
+                    nights = (dt.date.fromisoformat(ret)
+                              - dt.date.fromisoformat(dep)).days
+                    nights_txt = f", {nights} дн."
+                except ValueError:
+                    nights_txt = ""
+                dates_txt = f"туда {dep} → обратно {ret}{nights_txt}"
+            else:
+                dates_txt = f"вылет {dep}"
+        else:
+            dates_txt = f"вылет {dep}"
+ 
+        lines.append(f"• <b>{route_label(route)}</b>: {price} ₽\n"
+                     f"    {dates_txt} (порог {route['threshold']} ₽)")
     return "\n".join(lines)
  
  
@@ -313,6 +366,7 @@ CITY_NAMES = {
     "MOW": "Москва", "GOJ": "Нижний Новгород",
     "AYT": "Анталья", "GZP": "Аланья (Газипаша)",
     "DLM": "Даламан", "BJV": "Бодрум", "AER": "Сочи",
+    "HRG": "Хургада", "SSH": "Шарм-эль-Шейх",
 }
  
  
@@ -321,11 +375,15 @@ def city_name(code):
  
  
 # Направления для кнопки «🔥 Лучшие цены недели».
-# Каждый элемент: (город вылета, курорт). Все — билеты в одну сторону.
+# Каждый элемент: (город вылета, курорт, нужны_ли_пересадки). В одну сторону.
 BEST_DEALS_ROUTES = [
-    ("MOW", "AYT"),   # Москва — Анталья
-    ("MOW", "GZP"),   # Москва — Аланья
-    ("GOJ", "AYT"),   # Нижний Новгород — Анталья
+    ("MOW", "AYT", False),   # Москва — Анталья (есть прямые)
+    ("MOW", "GZP", True),    # Москва — Аланья (только с пересадками)
+    ("GOJ", "AYT", False),   # Нижний Новгород — Анталья
+    ("MOW", "HRG", False),   # Москва — Хургада (есть прямые)
+    ("MOW", "SSH", False),   # Москва — Шарм-эль-Шейх (есть прямые)
+    ("GOJ", "HRG", True),    # Нижний Новгород — Хургада (прямых может не быть)
+    ("GOJ", "SSH", True),    # Нижний Новгород — Шарм-эль-Шейх
 ]
  
  
@@ -343,15 +401,17 @@ def best_deals_text():
     Отсортировано от самого дешёвого к дорогому.
     """
     found = []
-    for origin, dest in BEST_DEALS_ROUTES:
-        route = {"origin": origin, "destination": dest, "trip_days": None}
+    for origin, dest, transfers in BEST_DEALS_ROUTES:
+        route = {"origin": origin, "destination": dest, "trip_days": None,
+                 "allow_transfers": transfers}
         try:
             price, details = get_week_min_price(route)
         except Exception:
             price, details = None, None
         if price is not None:
             dep = details.get("departure_at", "")[:10]
-            found.append((price, origin, dest, dep))
+            n_tr = details.get("transfers", 0)
+            found.append((price, origin, dest, dep, n_tr))
  
     if not found:
         return ("🔥 <b>Лучшие цены недели</b>\n\nПока нет данных по этим "
@@ -360,12 +420,13 @@ def best_deals_text():
     found.sort(key=lambda x: x[0])   # от дешёвого к дорогому
  
     lines = ["🔥 <b>Самые дешёвые поездки на ближайшую неделю</b>", ""]
-    for i, (price, origin, dest, dep) in enumerate(found, 1):
+    for i, (price, origin, dest, dep, n_tr) in enumerate(found, 1):
         medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else "•"))
         link = aviasales_link(origin, dest, dep)
+        tr_txt = "прямой" if n_tr == 0 else f"пересадок: {n_tr}"
         lines.append(
             f"{medal} <b>{city_name(origin)} → {city_name(dest)}</b>\n"
-            f"    {price} ₽ • вылет {dep}\n"
+            f"    {price} ₽ • вылет {dep} • {tr_txt}\n"
             f"    🔗 <a href=\"{link}\">купить</a>")
         lines.append("")
     return "\n".join(lines).strip()
@@ -512,7 +573,4 @@ def main():
 if __name__ == "__main__":
     main()
  
-
-
-if __name__ == "__main__":
     main()
