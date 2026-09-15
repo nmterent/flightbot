@@ -486,8 +486,10 @@ def explore_sea_destinations(origin="MOW", top_n=3):
         return ("🌍 <b>Куда улететь к морю</b>\n\nПока нет данных. "
                 "Попробуйте позже.")
 
-    # собираем только морские направления с вылетом в ближайшую неделю
-    found = []
+    # собираем все морские направления с корректной датой вылета в будущем;
+    # помечаем, попадает ли вылет в ближайшую неделю
+    week_items = []      # вылет в пределах недели
+    later_items = []     # вылет позже (запасной вариант, чтобы не отдавать пусто)
     for dest_code, info in directions.items():
         if dest_code not in SEA_DESTINATIONS:
             continue
@@ -499,19 +501,39 @@ def explore_sea_destinations(origin="MOW", top_n=3):
             dep_date = dt.date.fromisoformat(dep)
         except ValueError:
             continue
-        if not (today <= dep_date <= horizon):
+        if dep_date < today:
             continue
-        found.append((price, dest_code, dep))
+        if dep_date <= horizon:
+            week_items.append((price, dest_code, dep))
+        else:
+            later_items.append((price, dest_code, dep))
 
-    if not found:
-        return ("🌍 <b>Куда улететь к морю</b>\n\nНа ближайшую неделю дешёвых "
-                "тёплых направлений не нашлось. Попробуйте позже — предложения "
-                "обновляются.")
+    if not week_items and not later_items:
+        return ("🌍 <b>Куда улететь к морю</b>\n\nСейчас нет данных по тёплым "
+                "направлениям. Попробуйте позже — предложения обновляются.")
 
-    found.sort(key=lambda x: x[0])
-    lines = [f"🌍 <b>Самые дешёвые тёплые направления из "
-             f"{city_name(origin)} на ближайшую неделю</b>", ""]
-    for i, (price, dest, dep) in enumerate(found[:top_n], 1):
+    # приоритет — вылеты в пределах недели; если их нет, берём ближайшие доступные
+    if week_items:
+        week_items.sort(key=lambda x: x[0])
+        chosen = week_items[:top_n]
+        header = (f"🌍 <b>Самые дешёвые тёплые направления из "
+                  f"{city_name(origin)} на ближайшую неделю</b>")
+        note = None
+    else:
+        # ближайшие по дате вылета среди доступных
+        later_items.sort(key=lambda x: (x[2], x[0]))   # сначала по дате, потом цене
+        chosen = later_items[:top_n]
+        chosen.sort(key=lambda x: x[0])                # внутри — по цене
+        header = (f"🌍 <b>Дешёвые тёплые направления из "
+                  f"{city_name(origin)}</b>")
+        note = ("ℹ️ На ближайшую неделю прямых дешёвых предложений нет — "
+                "показываю ближайшие доступные даты.")
+
+    lines = [header, ""]
+    if note:
+        lines.append(note)
+        lines.append("")
+    for i, (price, dest, dep) in enumerate(chosen, 1):
         medal = "🥇" if i == 1 else ("🥈" if i == 2 else "🥉")
         link = aviasales_link(origin, dest, dep)
         lines.append(
