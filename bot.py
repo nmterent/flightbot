@@ -2,7 +2,7 @@
 """
 Flight Price Bot — интерактивный Telegram-бот для мониторинга авиабилетов
 через Aviasales / Travelpayouts.
- 
+
 Возможности:
   • Несколько маршрутов сразу (Москва, Нижний Новгород и любые другие).
   • Отслеживание всей ближайшей недели — минимум по всем дням.
@@ -15,12 +15,12 @@ Flight Price Bot — интерактивный Telegram-бот для мони�
         «💰 Текущие цены»     — показать актуальный минимум по всем маршрутам
         «🎚 Изменить порог»   — поменять порог цены, не редактируя код
         «ℹ️ Статус»           — что и как отслеживается
- 
+
 Запуск 24/7: см. README.md, Dockerfile и flightbot.service в этой папке.
- 
+
 Зависимости:  pip install requests matplotlib
 """
- 
+
 import os
 import csv
 import json
@@ -28,16 +28,16 @@ import time
 import threading
 import datetime as dt
 import requests
- 
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
- 
-# ------------------------------- CONFIG ------------------------------------- 
-API_TOKEN  = os.getenv("TP_TOKEN", "6b3cb2c3552940395c991540474872d6")
-TG_TOKEN   = os.getenv("TG_TOKEN", "8693344775:AAFZXJ_bO_yvkIlQNuQxQQaUFAD2Ppw8bwc")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID", "497754887")
+
+# ------------------------------- CONFIG -------------------------------------
+API_TOKEN  = os.getenv("TP_TOKEN", "ВАШ_ТОКЕН_TRAVELPAYOUTS")
+TG_TOKEN   = os.getenv("TG_TOKEN", "ВАШ_ТОКЕН_БОТА")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID", "ВАШ_CHAT_ID")
 
 # Маршруты. Для round-trip укажите trip_days (длительность поездки в днях);
 # для перелёта в одну сторону оставьте trip_days = None.
@@ -50,30 +50,30 @@ ROUTES = [
     {"origin": "MOW", "destination": "GZP", "threshold": 25000, "trip_days": None, "allow_transfers": True},
     {"origin": "GOJ", "destination": "GZP", "threshold": 30000, "trip_days": None, "allow_transfers": True},
 ]
- 
+
 WEEK_AHEAD_DAYS  = 7          # горизонт «ближайшей недели» для даты вылета
 CHECK_INTERVAL   = 300        # период проверки цен, сек (300 = 5 мин)
 DAILY_CHART_HOUR = 10         # час ежедневной отправки графиков (0-23)
 CURRENCY         = "rub"
- 
+
 HISTORY_CSV   = os.getenv("HISTORY_CSV", "price_history.csv")
 SETTINGS_JSON = os.getenv("SETTINGS_JSON", "settings.json")   # для порогов из чата
 # ----------------------------------------------------------------------------
- 
+
 # порог может меняться из чата — храним отдельно и подгружаем поверх ROUTES
 _settings_lock = threading.Lock()
- 
- 
+
+
 def route_key(route):
     base = f"{route['origin']}-{route['destination']}"
     return base + (f"-rt{route['trip_days']}" if route.get("trip_days") else "-ow")
- 
- 
+
+
 def route_label(route):
     kind = f"туда-обратно, {route['trip_days']} дн." if route.get("trip_days") else "в одну сторону"
     return f"{route['origin']}→{route['destination']} ({kind})"
- 
- 
+
+
 # ----------------------- НАСТРОЙКИ (пороги) из чата --------------------------
 def load_settings():
     if os.path.exists(SETTINGS_JSON):
@@ -86,8 +86,8 @@ def load_settings():
                     route["threshold"] = data["thresholds"][k]
         except Exception as e:
             print("! Не удалось загрузить настройки:", e)
- 
- 
+
+
 def save_threshold(route_k, value):
     with _settings_lock:
         data = {"thresholds": {}}
@@ -103,13 +103,13 @@ def save_threshold(route_k, value):
     for route in ROUTES:
         if route_key(route) == route_k:
             route["threshold"] = value
- 
- 
+
+
 # ----------------------------- ЗАПРОС ЦЕН -----------------------------------
 def get_week_min_price(route):
     """
     Мин. цена по маршруту в ближайшую неделю. Возвращает (price, details) или (None, None).
- 
+
     Поддерживает:
       • route['trip_days']       — round-trip: длительность поездки в днях
                                    (None = билет в одну сторону);
@@ -131,12 +131,12 @@ def get_week_min_price(route):
         params["one_way"] = "false"
     else:
         params["one_way"] = "true"
- 
+
     # по умолчанию только прямые; пересадки разрешаем, если явно указано
     # allow_transfers, ИЛИ это round-trip (обратные плечи часто с пересадкой)
     if not route.get("allow_transfers") and not route.get("trip_days"):
         params["direct"] = "true"
- 
+
     resp = requests.get(
         "https://api.travelpayouts.com/aviasales/v3/prices_for_dates",
         params=params, timeout=30)
@@ -144,7 +144,7 @@ def get_week_min_price(route):
     data = resp.json()
     if not data.get("success") or not data.get("data"):
         return None, None
- 
+
     horizon = today + dt.timedelta(days=WEEK_AHEAD_DAYS)
     trip_days = route.get("trip_days")
     best = None
@@ -156,7 +156,7 @@ def get_week_min_price(route):
             continue
         if not (today <= dep_date <= horizon):
             continue
- 
+
         # для round-trip: если задана длительность и известна дата возврата —
         # отсеиваем варианты, где поездка сильно отличается от желаемой (±2 дня)
         if trip_days:
@@ -169,14 +169,14 @@ def get_week_min_price(route):
                         continue
                 except ValueError:
                     pass
- 
+
         if best is None or item["price"] < best["price"]:
             best = item
     if best is None:
         return None, None
     return best["price"], best
- 
- 
+
+
 # ------------------------------ ИСТОРИЯ -------------------------------------
 def append_history(route, price):
     new_file = not os.path.exists(HISTORY_CSV)
@@ -186,8 +186,8 @@ def append_history(route, price):
             w.writerow(["timestamp", "route", "price"])
         w.writerow([dt.datetime.now().isoformat(timespec="minutes"),
                     route_key(route), price])
- 
- 
+
+
 def read_history(route):
     key = route_key(route)
     pts = []
@@ -202,36 +202,37 @@ def read_history(route):
                 except (ValueError, KeyError):
                     continue
     return pts
- 
- 
+
+
 # --------------------------- TELEGRAM API -----------------------------------
 def tg(method, **kwargs):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/{method}"
     return requests.post(url, timeout=60, **kwargs)
- 
- 
+
+
 def send_text(text, reply_markup=None):
     data = {"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML",
             "disable_web_page_preview": True}
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup)
     tg("sendMessage", data=data)
- 
- 
+
+
 def send_photo(path, caption=""):
     with open(path, "rb") as img:
         tg("sendPhoto",
            data={"chat_id": TG_CHAT_ID, "caption": caption, "parse_mode": "HTML"},
            files={"photo": img})
- 
- 
+
+
 def main_menu():
     return {"keyboard": [["🔥 Лучшие цены недели", "🏖 Куда дешевле"],
-                         ["💰 Текущие цены", "📊 График сейчас"],
-                         ["🎚 Изменить порог", "ℹ️ Статус"]],
+                         ["🌍 Куда улететь к морю", "💰 Текущие цены"],
+                         ["📊 График сейчас", "🎚 Изменить порог"],
+                         ["ℹ️ Статус"]],
             "resize_keyboard": True}
- 
- 
+
+
 # ------------------------------- ГРАФИК -------------------------------------
 def build_chart(route):
     pts = read_history(route)
@@ -240,7 +241,7 @@ def build_chart(route):
     pts.sort(key=lambda p: p[0])
     times = [p[0] for p in pts]
     prices = [p[1] for p in pts]
- 
+
     plt.figure(figsize=(10, 5))
     plt.plot(times, prices, marker="o", markersize=3, linewidth=1.5)
     plt.axhline(route["threshold"], color="red", linestyle="--",
@@ -253,8 +254,8 @@ def build_chart(route):
     fname = f"chart_{route_key(route)}.png"
     plt.savefig(fname, dpi=120); plt.close()
     return fname, prices
- 
- 
+
+
 def send_all_charts():
     any_sent = False
     for route in ROUTES:
@@ -269,8 +270,8 @@ def send_all_charts():
     if not any_sent:
         send_text("Пока недостаточно данных для графика — "
                   "подождите пару проверок.")
- 
- 
+
+
 # ------------------------ ФОНОВЫЙ МОНИТОРИНГ --------------------------------
 def monitor_loop():
     notified = {route_key(r): False for r in ROUTES}
@@ -301,19 +302,19 @@ def monitor_loop():
                     notified[key] = False
             except Exception as e:
                 print(f"   ! {key}: {e}")
- 
+
         if now.hour == DAILY_CHART_HOUR and last_chart_date != now.date():
             send_all_charts()
             last_chart_date = now.date()
- 
+
         time.sleep(CHECK_INTERVAL)
- 
- 
+
+
 # ------------------------ ОБРАБОТКА КНОПОК ----------------------------------
 # простое состояние диалога «изменить порог»
 _await_threshold = {"active": False, "route_k": None}
- 
- 
+
+
 def current_prices_text():
     lines = ["💰 <b>Текущий минимум за неделю:</b>", ""]
     for route in ROUTES:
@@ -324,12 +325,12 @@ def current_prices_text():
             price = None
             lines.append(f"• {route_label(route)}: ошибка запроса")
             continue
- 
+
         if price is None:
             lines.append(f"• {route_label(route)}: нет данных "
                          f"(порог {route['threshold']} ₽)")
             continue
- 
+
         dep = details.get("departure_at", "")[:10]
         if route.get("trip_days"):
             # round-trip: показываем обе даты и фактическую длительность
@@ -346,12 +347,12 @@ def current_prices_text():
                 dates_txt = f"вылет {dep}"
         else:
             dates_txt = f"вылет {dep}"
- 
+
         lines.append(f"• <b>{route_label(route)}</b>: {price} ₽\n"
                      f"    {dates_txt} (порог {route['threshold']} ₽)")
     return "\n".join(lines)
- 
- 
+
+
 def status_text():
     lines = ["ℹ️ <b>Отслеживаю маршруты:</b>"]
     for route in ROUTES:
@@ -359,8 +360,8 @@ def status_text():
     lines.append(f"\nПроверка каждые {CHECK_INTERVAL//60} мин. "
                  f"График ежедневно в {DAILY_CHART_HOUR}:00.")
     return "\n".join(lines)
- 
- 
+
+
 # понятные названия аэропортов-курортов для вывода
 CITY_NAMES = {
     "MOW": "Москва", "GOJ": "Нижний Новгород",
@@ -368,12 +369,12 @@ CITY_NAMES = {
     "DLM": "Даламан", "BJV": "Бодрум", "AER": "Сочи",
     "HRG": "Хургада", "SSH": "Шарм-эль-Шейх",
 }
- 
- 
+
+
 def city_name(code):
     return CITY_NAMES.get(code, code)
- 
- 
+
+
 # Направления для кнопки «🔥 Лучшие цены недели».
 # Каждый элемент: (город вылета, курорт, нужны_ли_пересадки). В одну сторону.
 BEST_DEALS_ROUTES = [
@@ -385,15 +386,15 @@ BEST_DEALS_ROUTES = [
     ("GOJ", "HRG", True),    # Нижний Новгород — Хургада (прямых может не быть)
     ("GOJ", "SSH", True),    # Нижний Новгород — Шарм-эль-Шейх
 ]
- 
- 
+
+
 def aviasales_link(origin, destination, dep_iso):
     """Ссылка на поиск Aviasales по дате вылета (формат MOW + ддмм + AYT + 1)."""
     d = dep_iso[8:10]      # день
     m = dep_iso[5:7]       # месяц
     return f"https://www.aviasales.ru/search/{origin}{d}{m}{destination}1"
- 
- 
+
+
 def best_deals_text():
     """
     Дайджест самых дешёвых поездок на ближайшую неделю по заданным
@@ -412,13 +413,13 @@ def best_deals_text():
             dep = details.get("departure_at", "")[:10]
             n_tr = details.get("transfers", 0)
             found.append((price, origin, dest, dep, n_tr))
- 
+
     if not found:
         return ("🔥 <b>Лучшие цены недели</b>\n\nПока нет данных по этим "
                 "направлениям. Попробуйте чуть позже.")
- 
+
     found.sort(key=lambda x: x[0])   # от дешёвого к дорогому
- 
+
     lines = ["🔥 <b>Самые дешёвые поездки на ближайшую неделю</b>", ""]
     for i, (price, origin, dest, dep, n_tr) in enumerate(found, 1):
         medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else "•"))
@@ -430,8 +431,99 @@ def best_deals_text():
             f"    🔗 <a href=\"{link}\">купить</a>")
         lines.append("")
     return "\n".join(lines).strip()
- 
- 
+
+
+# ---- «Куда улететь к морю»: поиск самых дешёвых тёплых направлений ----------
+# Морские/тёплые зарубежные направления (IATA-коды аэропортов).
+# Ключи фильтруют выдачу Travelpayouts: показываем только эти направления.
+SEA_DESTINATIONS = {
+    # Турция
+    "AYT": "Анталья (Турция)", "GZP": "Аланья (Турция)",
+    "DLM": "Даламан (Турция)", "BJV": "Бодрум (Турция)",
+    "ADB": "Измир (Турция)", "IST": "Стамбул (Турция)",
+    # Египет
+    "HRG": "Хургада (Египет)", "SSH": "Шарм-эль-Шейх (Египет)",
+    # ОАЭ
+    "DXB": "Дубай (ОАЭ)", "AUH": "Абу-Даби (ОАЭ)",
+    # Грузия / Азербайджан / Армения (тёплое море и курорты)
+    "BUS": "Батуми (Грузия)",
+    # Юго-Восточная Азия / Индийский океан
+    "HKT": "Пхукет (Таиланд)", "USM": "Самуи (Таиланд)",
+    "BKK": "Бангкок (Таиланд)", "MLE": "Мальдивы",
+    "CMB": "Шри-Ланка", "GOI": "Гоа (Индия)",
+    "DPS": "Бали (Индонезия)",
+    # Прочее тёплое побережье
+    "NHA": "Нячанг (Вьетнам)", "CXR": "Камрань (Вьетнам)",
+}
+
+
+def explore_sea_destinations(origin="MOW", top_n=3):
+    """
+    Ищет самые дешёвые тёплые зарубежные направления к морю из города вылета
+    на ближайшую неделю. Возвращает текст с топ-N вариантами.
+
+    Использует эндпоинт Travelpayouts 'prices/cheap'-подобный
+    (v1/city-directions), затем фильтрует по SEA_DESTINATIONS.
+    """
+    today = dt.date.today()
+    horizon = today + dt.timedelta(days=WEEK_AHEAD_DAYS)
+
+    url = "https://api.travelpayouts.com/v1/city-directions"
+    params = {
+        "origin": origin,
+        "currency": CURRENCY,
+        "token": API_TOKEN,
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return f"🌍 <b>Куда улететь к морю</b>\n\nНе удалось получить данные: {e}"
+
+    directions = data.get("data", {})
+    if not directions:
+        return ("🌍 <b>Куда улететь к морю</b>\n\nПока нет данных. "
+                "Попробуйте позже.")
+
+    # собираем только морские направления с вылетом в ближайшую неделю
+    found = []
+    for dest_code, info in directions.items():
+        if dest_code not in SEA_DESTINATIONS:
+            continue
+        price = info.get("price")
+        dep = str(info.get("departure_at", ""))[:10]
+        if price is None or not dep:
+            continue
+        try:
+            dep_date = dt.date.fromisoformat(dep)
+        except ValueError:
+            continue
+        if not (today <= dep_date <= horizon):
+            continue
+        found.append((price, dest_code, dep))
+
+    if not found:
+        return ("🌍 <b>Куда улететь к морю</b>\n\nНа ближайшую неделю дешёвых "
+                "тёплых направлений не нашлось. Попробуйте позже — предложения "
+                "обновляются.")
+
+    found.sort(key=lambda x: x[0])
+    lines = [f"🌍 <b>Самые дешёвые тёплые направления из "
+             f"{city_name(origin)} на ближайшую неделю</b>", ""]
+    for i, (price, dest, dep) in enumerate(found[:top_n], 1):
+        medal = "🥇" if i == 1 else ("🥈" if i == 2 else "🥉")
+        link = aviasales_link(origin, dest, dep)
+        lines.append(
+            f"{medal} <b>{SEA_DESTINATIONS[dest]}</b>\n"
+            f"    {price} ₽ • вылет {dep}\n"
+            f"    🔗 <a href=\"{link}\">купить</a>")
+        lines.append("")
+    lines.append("<i>Цены ориентировочные, из кэша Aviasales. "
+                 "Точная — на странице покупки.</i>")
+    return "\n".join(lines).strip()
+
+
 def compare_destinations_text():
     """
     Сравнивает курорты по цене и говорит, куда дешевле лететь.
@@ -452,12 +544,12 @@ def compare_destinations_text():
             dep = details.get("departure_at", "")[:10]
             by_origin.setdefault(origin, []).append(
                 (route["destination"], price, dep))
- 
+
     if not by_origin:
         return ("🏖 <b>Куда дешевле</b>\n\nПока нет данных по направлениям. "
                 "Попробуйте чуть позже — возможно, по этим курортам сейчас "
                 "нет предложений.")
- 
+
     lines = ["🏖 <b>Куда сейчас дешевле лететь</b>", ""]
     for origin, items in by_origin.items():
         # сортируем курорты по цене
@@ -476,19 +568,19 @@ def compare_destinations_text():
             lines.append(f"   👉 Доступно одно направление: "
                          f"<b>{city_name(best_dest)}</b>")
         lines.append("")
- 
+
     return "\n".join(lines).strip()
- 
- 
+
+
 def threshold_keyboard():
     kb = [[{"text": route_label(r), "callback_data": f"setth:{route_key(r)}"}]
           for r in ROUTES]
     return {"inline_keyboard": kb}
- 
- 
+
+
 def handle_message(text):
     global _await_threshold
- 
+
     if _await_threshold["active"]:
         # ждём число — новый порог
         try:
@@ -500,7 +592,7 @@ def handle_message(text):
             return
         _await_threshold = {"active": False, "route_k": None}
         return
- 
+
     if text in ("/start", "/menu"):
         send_text("Привет! Я слежу за ценами на авиабилеты и пришлю сигнал, "
                   "когда цена упадёт. Выберите действие:", main_menu())
@@ -512,6 +604,9 @@ def handle_message(text):
     elif text.startswith("🏖"):
         send_text("Сравниваю курорты…")
         send_text(compare_destinations_text(), main_menu())
+    elif text.startswith("🌍"):
+        send_text("Ищу самые дешёвые тёплые направления…")
+        send_text(explore_sea_destinations("MOW", top_n=3), main_menu())
     elif text.startswith("📊"):
         send_text("Готовлю графики…")
         send_all_charts()
@@ -521,15 +616,15 @@ def handle_message(text):
         send_text("Для какого маршрута изменить порог?", threshold_keyboard())
     else:
         send_text("Не понял команду. Нажмите /start для меню.", main_menu())
- 
- 
+
+
 def handle_callback(data):
     global _await_threshold
     if data.startswith("setth:"):
         _await_threshold = {"active": True, "route_k": data.split(":", 1)[1]}
         send_text("Введите новый порог в рублях (просто число, напр. 15000):")
- 
- 
+
+
 def telegram_loop():
     """Читает апдейты Telegram (long polling) и реагирует на кнопки."""
     offset = None
@@ -538,7 +633,7 @@ def telegram_loop():
         send_text("🚀 Бот запущен и следит за ценами.", main_menu())
     except Exception as e:
         print("! Не смог отправить стартовое сообщение:", e)
- 
+
     while True:
         try:
             params = {"timeout": 30}
@@ -559,8 +654,8 @@ def telegram_loop():
         except Exception as e:
             print("! Ошибка Telegram-цикла:", e)
             time.sleep(5)
- 
- 
+
+
 def main():
     load_settings()
     print(f"[{dt.datetime.now():%Y-%m-%d %H:%M}] Старт бота. Маршруты: "
@@ -568,9 +663,7 @@ def main():
     # мониторинг — в фоне, Telegram-цикл — в основном потоке
     threading.Thread(target=monitor_loop, daemon=True).start()
     telegram_loop()
- 
- 
+
+
 if __name__ == "__main__":
-    main()
- 
     main()
