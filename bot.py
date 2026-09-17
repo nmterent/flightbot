@@ -1,4 +1,3 @@
-PY
 #!/usr/bin/env python3
 """
 Flight Price Bot — интерактивный Telegram-бот для мониторинга авиабилетов
