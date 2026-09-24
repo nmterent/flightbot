@@ -27,7 +27,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
- 
+
 # ------------------------------- CONFIG -------------------------------------
 API_TOKEN  = os.getenv("TP_TOKEN", "6b3cb2c3552940395c991540474872d6")
 TG_TOKEN   = os.getenv("TG_TOKEN", "8693344775:AAFZXJ_bO_yvkIlQNuQxQQaUFAD2Ppw8bwc")
@@ -396,8 +396,7 @@ def status_text():
                      f"— порог {route['threshold']} \u20bd")
     r = ISTANBUL_ROUTE
     lines.append(f"• {route_label(r)} ({period_label(r)}) — порог {r['threshold']} \u20bd")
-    lines.append(f"\nПроверка каждые {CHECK_INTERVAL//60} мин. "
-                 f"График ежедневно в {DAILY_CHART_HOUR}:00.")
+    lines.append(f"\nПроверка каждые {CHECK_INTERVAL//60} мин.")
     lines.append(f"Участников с доступом: {len(ALLOWED_CHAT_IDS)}.")
     return "\n".join(lines)
  
@@ -499,6 +498,5 @@ def main():
  
  
 if __name__ == "__main__":
-    main()
     main()
  
