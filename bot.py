@@ -33,12 +33,14 @@ API_TOKEN  = os.getenv("TP_TOKEN", "6b3cb2c3552940395c991540474872d6")
 TG_TOKEN   = os.getenv("TG_TOKEN", "8693344775:AAFZXJ_bO_yvkIlQNuQxQQaUFAD2Ppw8bwc")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "497754887")
  
+
 # Кому разрешён доступ и кому идут авто-уведомления (падение цены, графики).
 # Впишите сюда chat_id всех участников. Узнать id: написать боту @userinfobot.
 # Можно задать и через переменную окружения ALLOWED_CHAT_IDS="111,222,333".
 ALLOWED_CHAT_IDS = [
     "497754887",         # участник 1 (вы)
     "477887785",         # участник 2
+    "1209160227",        # участник 3
 ]
 if os.getenv("ALLOWED_CHAT_IDS"):
     ALLOWED_CHAT_IDS = [x.strip() for x in os.getenv("ALLOWED_CHAT_IDS").split(",") if x.strip()]
@@ -306,7 +308,6 @@ def send_all_charts(chat_id=None):
 def monitor_loop():
     all_routes = ROUTES + [ISTANBUL_ROUTE]
     notified = {route_key(r): False for r in all_routes}
-    last_chart_date = None
     while True:
         now = dt.datetime.now()
         for route in all_routes:
@@ -333,9 +334,8 @@ def monitor_loop():
             except Exception as e:
                 print(f"   ! {key}: {e}")
  
-        if now.hour == DAILY_CHART_HOUR and last_chart_date != now.date():
-            send_all_charts()
-            last_chart_date = now.date()
+        # ежедневная авто-рассылка графиков в 10:00 отключена намеренно.
+        # Графики по-прежнему доступны вручную кнопкой «📊 График сейчас».
  
         time.sleep(CHECK_INTERVAL)
  
@@ -461,10 +461,8 @@ def handle_callback(data, chat_id):
  
 def telegram_loop():
     offset = None
-    try:
-        send_text("🚀 Бот запущен и следит за ценами.", main_menu())
-    except Exception as e:
-        print("! Не смог отправить стартовое сообщение:", e)
+    # стартовое сообщение всем участникам отключено намеренно
+    # (чтобы не рассылать уведомление при каждом перезапуске/передеплое)
  
     while True:
         try:
@@ -501,5 +499,6 @@ def main():
  
  
 if __name__ == "__main__":
+    main()
     main()
  
