@@ -3,12 +3,12 @@
 Flight Price Bot — Telegram-бот для мониторинга авиабилетов (Aviasales / Travelpayouts).
  
 Текущая конфигурация:
-  • Москва → Вьетнам (Нячанг, Дананг, Фукуок, Ханой), в одну сторону,
-    поиск минимальной цены за ВЕСЬ ноябрь 2026.
-  • Кнопка «🇹🇷 Стамбул» — Москва → Стамбул, поиск по октябрю 2026.
+  • Москва → 10 направлений Азии (Гуанчжоу, Шэньчжэнь, Бангкок, Самуи,
+    Пхукет, Денпасар, Себу, Манила, Шанхай, Пекин), в одну сторону,
+    поиск минимальной цены за период 16–22 декабря 2026.
   • Цены только за одного взрослого (ограничение источника данных).
   • Порог по цене для каждого маршрута, меняется кнопкой в чате.
-  • Уведомление при падении ниже порога, история в CSV, ежедневные графики.
+  • Уведомление при падении ниже порога, история в CSV, графики по кнопке.
   • Доступ у нескольких людей из списка ALLOWED_CHAT_IDS.
  
 Зависимости:  pip install requests matplotlib
@@ -27,7 +27,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-
+ 
 # ------------------------------- CONFIG -------------------------------------
 API_TOKEN  = os.getenv("TP_TOKEN", "6b3cb2c3552940395c991540474872d6")
 TG_TOKEN   = os.getenv("TG_TOKEN", "8693344775:AAFZXJ_bO_yvkIlQNuQxQQaUFAD2Ppw8bwc")
@@ -49,20 +49,20 @@ ALLOWED_CHAT_IDS = list(dict.fromkeys(str(x) for x in ALLOWED_CHAT_IDS))
 # Маршруты для постоянного мониторинга.
 # Каждый: origin, destination, порог, период поиска (date_from / date_to, YYYY-MM-DD).
 # Только билеты в одну сторону, цена за 1 взрослого.
+# Период для всех: 16–22 декабря 2026.
+_DF, _DT = "2026-12-16", "2026-12-22"
 ROUTES = [
-    {"origin": "MOW", "destination": "CXR", "threshold": 45000,
-     "date_from": "2026-11-01", "date_to": "2026-11-30"},   # Нячанг
-    {"origin": "MOW", "destination": "DAD", "threshold": 45000,
-     "date_from": "2026-11-01", "date_to": "2026-11-30"},   # Дананг
-    {"origin": "MOW", "destination": "PQC", "threshold": 45000,
-     "date_from": "2026-11-01", "date_to": "2026-11-30"},   # Фукуок
-    {"origin": "MOW", "destination": "HAN", "threshold": 40000,
-     "date_from": "2026-11-01", "date_to": "2026-11-30"},   # Ханой
+    {"origin": "MOW", "destination": "CAN", "threshold": 40000, "date_from": _DF, "date_to": _DT},  # Гуанчжоу
+    {"origin": "MOW", "destination": "SZX", "threshold": 40000, "date_from": _DF, "date_to": _DT},  # Шэньчжэнь
+    {"origin": "MOW", "destination": "BKK", "threshold": 35000, "date_from": _DF, "date_to": _DT},  # Бангкок
+    {"origin": "MOW", "destination": "USM", "threshold": 45000, "date_from": _DF, "date_to": _DT},  # Самуи
+    {"origin": "MOW", "destination": "HKT", "threshold": 40000, "date_from": _DF, "date_to": _DT},  # Пхукет
+    {"origin": "MOW", "destination": "DPS", "threshold": 45000, "date_from": _DF, "date_to": _DT},  # Денпасар (Бали)
+    {"origin": "MOW", "destination": "CEB", "threshold": 50000, "date_from": _DF, "date_to": _DT},  # Себу
+    {"origin": "MOW", "destination": "MNL", "threshold": 45000, "date_from": _DF, "date_to": _DT},  # Манила
+    {"origin": "MOW", "destination": "SHA", "threshold": 35000, "date_from": _DF, "date_to": _DT},  # Шанхай
+    {"origin": "MOW", "destination": "BJS", "threshold": 35000, "date_from": _DF, "date_to": _DT},  # Пекин
 ]
- 
-# Отдельная кнопка «🇹🇷 Стамбул» — свой период (октябрь 2026).
-ISTANBUL_ROUTE = {"origin": "MOW", "destination": "IST", "threshold": 20000,
-                  "date_from": "2026-10-01", "date_to": "2026-10-31"}
  
 CHECK_INTERVAL   = 300        # период проверки цен, сек (300 = 5 мин)
 DAILY_CHART_HOUR = 10         # час ежедневной отправки графиков (0-23)
@@ -73,8 +73,10 @@ SETTINGS_JSON = os.getenv("SETTINGS_JSON", "settings.json")
 # ----------------------------------------------------------------------------
  
 CITY_NAMES = {
-    "MOW": "Москва", "CXR": "Нячанг", "DAD": "Дананг",
-    "PQC": "Фукуок", "HAN": "Ханой", "IST": "Стамбул",
+    "MOW": "Москва",
+    "CAN": "Гуанчжоу", "SZX": "Шэньчжэнь", "BKK": "Бангкок",
+    "USM": "Самуи", "HKT": "Пхукет", "DPS": "Денпасар (Бали)",
+    "CEB": "Себу", "MNL": "Манила", "SHA": "Шанхай", "BJS": "Пекин",
 }
  
  
@@ -100,7 +102,7 @@ def load_settings():
             with open(SETTINGS_JSON, encoding="utf-8") as f:
                 data = json.load(f)
             thr = data.get("thresholds", {})
-            for route in ROUTES + [ISTANBUL_ROUTE]:
+            for route in ROUTES:
                 k = route_key(route)
                 if k in thr:
                     route["threshold"] = thr[k]
@@ -120,7 +122,7 @@ def save_threshold(route_k, value):
         data.setdefault("thresholds", {})[route_k] = value
         with open(SETTINGS_JSON, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    for route in ROUTES + [ISTANBUL_ROUTE]:
+    for route in ROUTES:
         if route_key(route) == route_k:
             route["threshold"] = value
  
@@ -243,7 +245,7 @@ def send_photo(path, caption="", chat_id=None):
  
  
 def main_menu():
-    return {"keyboard": [["💰 Цены Вьетнам", "🇹🇷 Стамбул"],
+    return {"keyboard": [["💰 Цены на билеты"],
                          ["📊 График сейчас", "🎚 Изменить порог"],
                          ["ℹ️ Статус"]],
             "resize_keyboard": True}
@@ -290,7 +292,7 @@ def build_chart(route):
  
 def send_all_charts(chat_id=None):
     any_sent = False
-    for route in ROUTES + [ISTANBUL_ROUTE]:
+    for route in ROUTES:
         res = build_chart(route)
         if res:
             fname, prices = res
@@ -306,7 +308,7 @@ def send_all_charts(chat_id=None):
  
 # ------------------------ ФОНОВЫЙ МОНИТОРИНГ --------------------------------
 def monitor_loop():
-    all_routes = ROUTES + [ISTANBUL_ROUTE]
+    all_routes = ROUTES
     notified = {route_key(r): False for r in all_routes}
     while True:
         now = dt.datetime.now()
@@ -341,17 +343,18 @@ def monitor_loop():
  
  
 # ------------------------ ТЕКСТЫ КНОПОК -------------------------------------
-def vietnam_prices_text():
-    lines = ["💰 <b>Москва → Вьетнам, ноябрь 2026 (за взрослого, в одну сторону)</b>", ""]
+def all_prices_text():
+    lines = ["💰 <b>Москва → Азия, 16–22 декабря 2026 "
+             "(за взрослого, в одну сторону)</b>", ""]
     found = []
+    missing = []
     for route in ROUTES:
         try:
             price, details = get_min_price(route)
         except Exception:
             price, details = None, None
         if price is None:
-            lines.append(f"• {route_label(route)}: нет данных "
-                         f"(порог {route['threshold']} \u20bd)")
+            missing.append(route)
         else:
             dep = details.get("departure_at", "")[:10]
             found.append((price, route, dep))
@@ -364,38 +367,22 @@ def vietnam_prices_text():
             f"{medal} <b>{route_label(route)}</b>: {price} \u20bd\n"
             f"    вылет {dep} • порог {route['threshold']} \u20bd\n"
             f"    🔗 <a href=\"{link}\">купить</a>")
+ 
+    if missing:
+        lines.append("")
+        lines.append("<b>Нет данных:</b> " +
+                     ", ".join(city_name(r["destination"]) for r in missing))
+ 
     lines.append("")
     lines.append("<i>Цена за 1 взрослого, ориентировочная (кэш Aviasales). "
                  "Точная — на странице покупки.</i>")
     return "\n".join(lines).strip()
  
  
-def istanbul_text():
-    route = ISTANBUL_ROUTE
-    try:
-        price, details = get_min_price(route)
-    except Exception:
-        price, details = None, None
-    if price is None:
-        return (f"🇹🇷 <b>{route_label(route)}, {period_label(route)}</b>\n\n"
-                f"Нет данных. Попробуйте позже.")
-    dep = details.get("departure_at", "")[:10]
-    link = aviasales_link(route, dep)
-    return (f"🇹🇷 <b>{route_label(route)}, {period_label(route)}</b>\n\n"
-            f"Минимум за взрослого: <b>{price} \u20bd</b>\n"
-            f"Лучшая дата: {dep} • порог {route['threshold']} \u20bd\n\n"
-            f"🔗 <a href=\"{link}\">купить</a>\n\n"
-            f"<i>Цена ориентировочная (кэш Aviasales). "
-            f"Точная — на странице покупки.</i>")
- 
- 
 def status_text():
-    lines = ["ℹ️ <b>Отслеживаю маршруты:</b>", ""]
+    lines = ["ℹ️ <b>Отслеживаю маршруты (16–22 декабря 2026):</b>", ""]
     for route in ROUTES:
-        lines.append(f"• {route_label(route)} ({period_label(route)}) "
-                     f"— порог {route['threshold']} \u20bd")
-    r = ISTANBUL_ROUTE
-    lines.append(f"• {route_label(r)} ({period_label(r)}) — порог {r['threshold']} \u20bd")
+        lines.append(f"• {route_label(route)} — порог {route['threshold']} \u20bd")
     lines.append(f"\nПроверка каждые {CHECK_INTERVAL//60} мин.")
     lines.append(f"Участников с доступом: {len(ALLOWED_CHAT_IDS)}.")
     return "\n".join(lines)
@@ -404,7 +391,7 @@ def status_text():
 def threshold_keyboard():
     kb = [[{"text": f"{route_label(r)} ({period_label(r)})",
             "callback_data": f"setth:{route_key(r)}"}]
-          for r in ROUTES + [ISTANBUL_ROUTE]]
+          for r in ROUTES]
     return {"inline_keyboard": kb}
  
  
@@ -432,11 +419,8 @@ def handle_message(text, chat_id):
                   "когда цена упадёт ниже порога. Выберите действие:",
                   main_menu(), chat_id=chat_id)
     elif text.startswith("💰"):
-        send_text("Собираю цены по Вьетнаму…", chat_id=chat_id)
-        send_text(vietnam_prices_text(), main_menu(), chat_id=chat_id)
-    elif text.startswith("🇹🇷"):
-        send_text("Смотрю Стамбул…", chat_id=chat_id)
-        send_text(istanbul_text(), main_menu(), chat_id=chat_id)
+        send_text("Собираю цены по всем направлениям…", chat_id=chat_id)
+        send_text(all_prices_text(), main_menu(), chat_id=chat_id)
     elif text.startswith("📊"):
         send_text("Готовлю графики…", chat_id=chat_id)
         send_all_charts(chat_id=chat_id)
@@ -492,7 +476,7 @@ def telegram_loop():
 def main():
     load_settings()
     print(f"[{dt.datetime.now():%Y-%m-%d %H:%M}] Старт бота. Маршруты: "
-          f"{', '.join(route_key(r) for r in ROUTES + [ISTANBUL_ROUTE])}")
+          f"{', '.join(route_key(r) for r in ROUTES)}")
     threading.Thread(target=monitor_loop, daemon=True).start()
     telegram_loop()
  
